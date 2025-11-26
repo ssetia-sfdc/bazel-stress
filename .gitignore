@@ -1,0 +1,37 @@
+# Bazel build outputs
+bazel-*
+!bazel-tools/
+
+# Generated BUILD files (user-generated via tools:gen, not committed)
+# Note: tools/BUILD and third_party/BUILD should be committed
+/BUILD
+
+# IDE files
+.idea/
+.vscode/
+.cursor/
+*.swp
+*.swo
+*~
+.DS_Store
+
+# Go (if used outside Bazel)
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+*.test
+*.out
+go.work
+
+# Temporary files
+*.tmp
+*.log
+*.bak
+*.orig
+
+# OS files
+Thumbs.db
+.DS_Store
+

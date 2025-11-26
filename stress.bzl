@@ -11,7 +11,7 @@ remote_ex_rule = rule(
     attrs = {
         "deps": attr.label_list(),
         "usecs": attr.int(mandatory=True),
-        "_ex": attr.label(default="//tools:ex", executable=True, cfg="host"),
+        "_ex": attr.label(default="//tools:ex", executable=True, cfg="exec"),
     },
     outputs = {
         "txt": "%{name}.txt",
