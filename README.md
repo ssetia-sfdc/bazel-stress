@@ -37,8 +37,10 @@ bazel build :all
 
 This builds all generated targets. Each target:
 - Runs a CPU-bound task (busy-wait) for a random duration
+- Reads random lines from a unique input file (file I/O operations)
+- Writes selected lines to an output file
 - Has dependencies forming a build graph
-- Tests Bazel's parallel build capabilities
+- Tests Bazel's parallel build capabilities with realistic file operations
 
 **Goal:** Shortest time for a given parameter set wins.
 
@@ -53,9 +55,9 @@ bazel build :all --remote_cache=...  # Use remote caching
 This project is implemented in Go and uses Bazel's Bzlmod for dependency management.
 
 **Main components:**
-- `tools/gen.go`: Generates BUILD files using a linear noise algorithm
-- `tools/ex.go`: Executable that busy-waits for a specified time and creates output files
-- `stress.bzl`: Bazel rule definition for the stress test targets
+- `tools/gen.go`: Generates BUILD files using a linear noise algorithm, including input file generation
+- `tools/ex.go`: Executable that busy-waits, reads random lines from input files, and writes to output files
+- `stress.bzl`: Bazel rule definition for the stress test targets with file I/O support
 - `MODULE.bazel`: Bzlmod configuration (Bazel 8+)
 
 ## Requirements

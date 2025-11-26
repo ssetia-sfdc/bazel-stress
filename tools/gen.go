@@ -87,18 +87,22 @@ func randomFloat() float64 {
 
 // Target represents a Bazel target
 type Target struct {
-	Rule string
-	Name string
-	Deps []string
+	Rule      string
+	Name      string
+	Deps      []string
+	InputFile string
 }
 
 // Package represents a collection of targets
 type Package struct {
-	Targets []Target
+	Targets    []Target
+	InputFiles []string
 }
 
 const packageTemplate = `# Generated package for remote ex stress test
 load(":stress.bzl", "remote_ex_rule")
+{{range .InputFiles}}
+{{.}}{{end}}
 {{range .Targets}}
 {{.Render}}{{end}}
 `
@@ -106,6 +110,9 @@ load(":stress.bzl", "remote_ex_rule")
 const targetTemplate = `{{.Rule}}(
     name = "{{.Name}}",
     usecs = {{.RandomUsecs}},
+{{- if .InputFile}}
+    input_file = ":{{.InputFile}}",
+{{- end}}
 {{- if .Deps}}
 {{- if eq (len .Deps) 1}}
     deps = ["{{index .Deps 0}}"],
@@ -131,6 +138,7 @@ func (t Target) Render() string {
 		Rule        string
 		Name        string
 		Deps        []string
+		InputFile   string
 		RandomUsecs int
 	}
 
@@ -138,6 +146,7 @@ func (t Target) Render() string {
 		Rule:        t.Rule,
 		Name:        t.Name,
 		Deps:        t.Deps,
+		InputFile:   t.InputFile,
 		RandomUsecs: randomInt(1000000),
 	}
 
@@ -161,7 +170,8 @@ func (p Package) Render() string {
 	}
 
 	type PackageData struct {
-		Targets []TargetRenderData
+		Targets    []TargetRenderData
+		InputFiles []string
 	}
 
 	renderData := make([]TargetRenderData, len(p.Targets))
@@ -171,7 +181,10 @@ func (p Package) Render() string {
 		}
 	}
 
-	data := PackageData{Targets: renderData}
+	data := PackageData{
+		Targets:    renderData,
+		InputFiles: p.InputFiles,
+	}
 
 	var buf bytes.Buffer
 	err = tmpl.Execute(&buf, data)
@@ -195,6 +208,54 @@ func randomHex() string {
 	b := make([]byte, 16)
 	rand.Read(b)
 	return hex.EncodeToString(b)
+}
+
+// generateInputFileContent generates random lines of text for an input file
+func generateInputFileContent(numLines int) string {
+	var builder bytes.Buffer
+	for i := 0; i < numLines; i++ {
+		// Generate a random line (20-80 characters)
+		lineLen := randomInt(60) + 20
+		for j := 0; j < lineLen; j++ {
+			// Random printable ASCII character (avoid problematic chars for shell)
+			char := randomInt(62)
+			if char < 26 {
+				builder.WriteByte(byte('a' + char))
+			} else if char < 52 {
+				builder.WriteByte(byte('A' + char - 26))
+			} else {
+				builder.WriteByte(byte('0' + char - 52))
+			}
+		}
+		builder.WriteString("\\n")
+	}
+	return builder.String()
+}
+
+// generateGenruleForInputFile generates a Bazel genrule target for an input file
+func generateGenruleForInputFile(name string, content string) string {
+	// Escape the content for Bazel (replace newlines and quotes)
+	escapedContent := ""
+	for _, char := range content {
+		switch char {
+		case '\n':
+			escapedContent += "\\n"
+		case '"':
+			escapedContent += "\\\""
+		case '\\':
+			escapedContent += "\\\\"
+		default:
+			escapedContent += string(char)
+		}
+	}
+
+	return fmt.Sprintf(`genrule(
+    name = "%s",
+    outs = ["%s.txt"],
+    cmd = "echo -e \"%s\" > $@",
+)
+
+`, name, name, escapedContent)
 }
 
 func main() {
@@ -229,12 +290,31 @@ func main() {
 		level := make([]Target, width)
 		for i := 0; i < width; i++ {
 			level[i] = Target{
-				Rule: "remote_ex_rule",
-				Name: randomHex(),
-				Deps: []string{},
+				Rule:      "remote_ex_rule",
+				Name:      randomHex(),
+				Deps:      []string{},
+				InputFile: "", // Will be set below
 			}
 		}
 		levels = append(levels, level)
+	}
+
+	// Generate input files for all targets
+	var inputFileNames []string
+	inputFileMap := make(map[string]string) // Maps target name to input file name
+
+	// Flatten all targets first to generate input files
+	var allTargets []Target
+	for _, level := range levels {
+		allTargets = append(allTargets, level...)
+	}
+
+	// Generate a unique input file for each target
+	for i := range allTargets {
+		inputFileName := "input_" + allTargets[i].Name
+		inputFileNames = append(inputFileNames, inputFileName)
+		inputFileMap[allTargets[i].Name] = inputFileName
+		allTargets[i].InputFile = inputFileName
 	}
 
 	// Add dependencies: each target in level i depends on one random target from level i-1
@@ -248,13 +328,32 @@ func main() {
 		}
 	}
 
-	// Flatten all targets into a package
-	var allTargets []Target
+	// Regenerate allTargets with updated dependencies, preserving InputFile assignments
+	allTargets = []Target{}
 	for _, level := range levels {
-		allTargets = append(allTargets, level...)
+		for _, target := range level {
+			// Restore InputFile from the map
+			if inputFile, ok := inputFileMap[target.Name]; ok {
+				target.InputFile = inputFile
+			}
+			allTargets = append(allTargets, target)
+		}
 	}
 
-	pkg := Package{Targets: allTargets}
+	// Generate genrule targets for input files
+	var inputFileRules []string
+	for _, inputFileName := range inputFileNames {
+		// Generate random content (10-50 lines per file)
+		numLines := randomInt(40) + 10
+		content := generateInputFileContent(numLines)
+		rule := generateGenruleForInputFile(inputFileName, content)
+		inputFileRules = append(inputFileRules, rule)
+	}
+
+	pkg := Package{
+		Targets:    allTargets,
+		InputFiles: inputFileRules,
+	}
 	fmt.Print(pkg.Render())
 }
 
