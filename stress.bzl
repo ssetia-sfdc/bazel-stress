@@ -1,15 +1,19 @@
 def _remote_ex_rule(ctx):
-    # Collect all input files (deps outputs + input_file if specified)
+    # Collect all input files (deps outputs + input_files if specified)
     input_files = ctx.files.deps
-    if ctx.file.input_file:
-        input_files = input_files + [ctx.file.input_file]
+    if ctx.files.input_files:
+        input_files = input_files + ctx.files.input_files
     
     arguments = [str(ctx.attr.usecs)]
-    if ctx.file.input_file:
-        arguments.append(ctx.file.input_file.path)
+    
+    # Add all input file paths as arguments
+    if ctx.files.input_files:
+        for input_file in ctx.files.input_files:
+            arguments.append(input_file.path)
     else:
-        # If no input file, create a default one on the fly
+        # If no input files, pass empty string
         arguments.append("")
+    
     arguments.append(ctx.outputs.txt.path)
     
     ctx.actions.run(
@@ -24,7 +28,7 @@ remote_ex_rule = rule(
     attrs = {
         "deps": attr.label_list(),
         "usecs": attr.int(mandatory=True),
-        "input_file": attr.label(allow_single_file=True, doc="Input file to read random lines from"),
+        "input_files": attr.label_list(allow_files=True, doc="Input files to read random lines from"),
         "_ex": attr.label(default="//tools:ex", executable=True, cfg="exec"),
     },
     outputs = {

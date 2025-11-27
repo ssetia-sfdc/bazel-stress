@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"math"
 	"os"
+	"path/filepath"
 	"strconv"
 	"text/template"
 )
@@ -87,22 +88,31 @@ func randomFloat() float64 {
 
 // Target represents a Bazel target
 type Target struct {
-	Rule      string
-	Name      string
-	Deps      []string
-	InputFile string
+	Rule       string
+	Name       string
+	Deps       []string
+	InputFiles []string // List of input file paths relative to the directory
 }
 
 // Package represents a collection of targets
 type Package struct {
-	Targets    []Target
-	InputFiles []string
+	Targets      []Target
+	FilegroupSrc []string // Source files for filegroup (if input directory provided)
 }
 
 const packageTemplate = `# Generated package for remote ex stress test
 load(":stress.bzl", "remote_ex_rule")
-{{range .InputFiles}}
-{{.}}{{end}}
+{{- if .FilegroupSrc}}
+filegroup(
+    name = "input_files",
+    srcs = [
+{{- range .FilegroupSrc}}
+        "{{.}}",
+{{- end}}
+    ],
+    visibility = ["//visibility:public"],
+)
+{{- end}}
 {{range .Targets}}
 {{.Render}}{{end}}
 `
@@ -110,8 +120,16 @@ load(":stress.bzl", "remote_ex_rule")
 const targetTemplate = `{{.Rule}}(
     name = "{{.Name}}",
     usecs = {{.RandomUsecs}},
-{{- if .InputFile}}
-    input_file = ":{{.InputFile}}",
+{{- if .InputFiles}}
+{{- if eq (len .InputFiles) 1}}
+    input_files = ["{{index .InputFiles 0}}"],
+{{- else}}
+    input_files = [
+{{- range .InputFiles}}
+        "{{.}}",
+{{- end}}
+    ],
+{{- end}}
 {{- end}}
 {{- if .Deps}}
 {{- if eq (len .Deps) 1}}
@@ -138,7 +156,7 @@ func (t Target) Render() string {
 		Rule        string
 		Name        string
 		Deps        []string
-		InputFile   string
+		InputFiles  []string
 		RandomUsecs int
 	}
 
@@ -146,7 +164,7 @@ func (t Target) Render() string {
 		Rule:        t.Rule,
 		Name:        t.Name,
 		Deps:        t.Deps,
-		InputFile:   t.InputFile,
+		InputFiles:  t.InputFiles,
 		RandomUsecs: randomInt(1000000),
 	}
 
@@ -170,8 +188,8 @@ func (p Package) Render() string {
 	}
 
 	type PackageData struct {
-		Targets    []TargetRenderData
-		InputFiles []string
+		Targets      []TargetRenderData
+		FilegroupSrc []string
 	}
 
 	renderData := make([]TargetRenderData, len(p.Targets))
@@ -182,8 +200,8 @@ func (p Package) Render() string {
 	}
 
 	data := PackageData{
-		Targets:    renderData,
-		InputFiles: p.InputFiles,
+		Targets:      renderData,
+		FilegroupSrc: p.FilegroupSrc,
 	}
 
 	var buf bytes.Buffer
@@ -210,57 +228,12 @@ func randomHex() string {
 	return hex.EncodeToString(b)
 }
 
-// generateInputFileContent generates random lines of text for an input file
-func generateInputFileContent(numLines int) string {
-	var builder bytes.Buffer
-	for i := 0; i < numLines; i++ {
-		// Generate a random line (20-80 characters)
-		lineLen := randomInt(60) + 20
-		for j := 0; j < lineLen; j++ {
-			// Random printable ASCII character (avoid problematic chars for shell)
-			char := randomInt(62)
-			if char < 26 {
-				builder.WriteByte(byte('a' + char))
-			} else if char < 52 {
-				builder.WriteByte(byte('A' + char - 26))
-			} else {
-				builder.WriteByte(byte('0' + char - 52))
-			}
-		}
-		builder.WriteString("\\n")
-	}
-	return builder.String()
-}
-
-// generateGenruleForInputFile generates a Bazel genrule target for an input file
-func generateGenruleForInputFile(name string, content string) string {
-	// Escape the content for Bazel (replace newlines and quotes)
-	escapedContent := ""
-	for _, char := range content {
-		switch char {
-		case '\n':
-			escapedContent += "\\n"
-		case '"':
-			escapedContent += "\\\""
-		case '\\':
-			escapedContent += "\\\\"
-		default:
-			escapedContent += string(char)
-		}
-	}
-
-	return fmt.Sprintf(`genrule(
-    name = "%s",
-    outs = ["%s.txt"],
-    cmd = "echo -e \"%s\" > $@",
-)
-
-`, name, name, escapedContent)
-}
-
 func main() {
 	if len(os.Args) < 3 {
-		fmt.Fprintf(os.Stderr, "Usage: %s <shift> <desired_targets>\n", os.Args[0])
+		fmt.Fprintf(os.Stderr, "Usage: %s <shift> <desired_targets> [input_dir]\n", os.Args[0])
+		fmt.Fprintf(os.Stderr, "  shift: power-of-2 degree for linear noise\n")
+		fmt.Fprintf(os.Stderr, "  desired_targets: approximate number of targets to generate\n")
+		fmt.Fprintf(os.Stderr, "  input_dir: (optional) directory containing pre-generated input files\n")
 		os.Exit(1)
 	}
 
@@ -274,6 +247,91 @@ func main() {
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Invalid desired_targets: %v\n", err)
 		os.Exit(1)
+	}
+
+	var inputDir string
+	var availableFiles []string
+	var inputDirLabel string // Path to use in BUILD file
+	if len(os.Args) >= 4 {
+		inputDir = os.Args[3]
+
+		// Get workspace root - Bazel sets BUILD_WORKSPACE_DIRECTORY when running via 'bazel run'
+		workspaceRoot := os.Getenv("BUILD_WORKSPACE_DIRECTORY")
+		if workspaceRoot == "" {
+			// Fallback: try to find workspace root by looking for MODULE.bazel or WORKSPACE
+			cwd, err := os.Getwd()
+			if err == nil {
+				// Walk up the directory tree to find MODULE.bazel or WORKSPACE
+				dir := cwd
+				for {
+					if _, err := os.Stat(filepath.Join(dir, "MODULE.bazel")); err == nil {
+						workspaceRoot = dir
+						break
+					}
+					if _, err := os.Stat(filepath.Join(dir, "WORKSPACE")); err == nil {
+						workspaceRoot = dir
+						break
+					}
+					parent := filepath.Dir(dir)
+					if parent == dir {
+						break // Reached root
+					}
+					dir = parent
+				}
+			}
+		}
+
+		// Resolve the input directory path
+		var resolvedDir string
+		if filepath.IsAbs(inputDir) {
+			resolvedDir = inputDir
+		} else {
+			// Relative path - resolve relative to workspace root
+			if workspaceRoot != "" {
+				resolvedDir = filepath.Join(workspaceRoot, inputDir)
+			} else {
+				// Fallback: use current working directory
+				resolvedDir = inputDir
+			}
+			// Clean the path
+			resolvedDir = filepath.Clean(resolvedDir)
+		}
+
+		// Read all files from the directory
+		entries, err := os.ReadDir(resolvedDir)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "Error reading input directory %s: %v\n", resolvedDir, err)
+			if !filepath.IsAbs(inputDir) && workspaceRoot != "" {
+				fmt.Fprintf(os.Stderr, "  (resolved from workspace root: %s + %s)\n", workspaceRoot, inputDir)
+			}
+			os.Exit(1)
+		}
+
+		for _, entry := range entries {
+			if !entry.IsDir() {
+				availableFiles = append(availableFiles, entry.Name())
+			}
+		}
+
+		if len(availableFiles) == 0 {
+			fmt.Fprintf(os.Stderr, "Warning: No files found in input directory %s\n", resolvedDir)
+		} else {
+			fmt.Fprintf(os.Stderr, "Found %d input files in %s\n", len(availableFiles), resolvedDir)
+		}
+
+		// Store the path to use in BUILD file
+		// For BUILD files, we want to use the original path (relative to workspace root)
+		// not the resolved absolute path
+		if filepath.IsAbs(inputDir) {
+			// Absolute path - use as-is
+			inputDirLabel = inputDir
+		} else {
+			// Relative path - use the cleaned original path (not the resolved absolute one)
+			inputDirLabel = filepath.Clean(inputDir)
+			if inputDirLabel == "." {
+				inputDirLabel = ""
+			}
+		}
 	}
 
 	noise := NewLinearNoise(shift)
@@ -290,31 +348,74 @@ func main() {
 		level := make([]Target, width)
 		for i := 0; i < width; i++ {
 			level[i] = Target{
-				Rule:      "remote_ex_rule",
-				Name:      randomHex(),
-				Deps:      []string{},
-				InputFile: "", // Will be set below
+				Rule:       "remote_ex_rule",
+				Name:       randomHex(),
+				Deps:       []string{},
+				InputFiles: []string{}, // Will be set below
 			}
 		}
 		levels = append(levels, level)
 	}
 
-	// Generate input files for all targets
-	var inputFileNames []string
-	inputFileMap := make(map[string]string) // Maps target name to input file name
-
-	// Flatten all targets first to generate input files
+	// Flatten all targets first
 	var allTargets []Target
 	for _, level := range levels {
 		allTargets = append(allTargets, level...)
 	}
 
-	// Generate a unique input file for each target
+	// Assign input files to targets
+	if len(availableFiles) > 0 && inputDirLabel != "" {
+		for i := range allTargets {
+			// Randomly decide how many input files this target should have (1 to 3, or up to available)
+			maxFiles := 3
+			if len(availableFiles) < maxFiles {
+				maxFiles = len(availableFiles)
+			}
+			numFiles := randomInt(maxFiles) + 1
+
+			// Randomly select files (without replacement within the same target to avoid duplicates)
+			// Use a map to track selected files for this target
+			selectedIndices := make(map[int]bool)
+			for len(selectedIndices) < numFiles {
+				fileIdx := randomInt(len(availableFiles))
+				selectedIndices[fileIdx] = true
+			}
+
+			// Build the list of selected file paths
+			selectedFiles := make([]string, 0, numFiles)
+			for fileIdx := range selectedIndices {
+				fileName := availableFiles[fileIdx]
+				// Create file path for Bazel
+				// If inputDirLabel is empty, file is in current directory
+				// Otherwise, use the directory path + filename
+				var filePath string
+				if inputDirLabel == "" || inputDirLabel == "." {
+					filePath = fileName
+				} else if filepath.IsAbs(inputDirLabel) {
+					// For absolute paths, use the full path
+					// Note: Bazel may require these files to be accessible at build time
+					// User may need to set up filegroups or ensure files are in the sandbox
+					filePath = filepath.Join(inputDirLabel, fileName)
+					// Use forward slashes for consistency
+					filePath = filepath.ToSlash(filePath)
+				} else {
+					// Relative path - join directory and filename
+					filePath = filepath.Join(inputDirLabel, fileName)
+					// Use forward slashes for Bazel (works on all platforms)
+					filePath = filepath.ToSlash(filePath)
+				}
+				selectedFiles = append(selectedFiles, filePath)
+			}
+			allTargets[i].InputFiles = selectedFiles
+		}
+	}
+
+	// Store InputFiles assignments by target name before adding dependencies
+	inputFilesMap := make(map[string][]string)
 	for i := range allTargets {
-		inputFileName := "input_" + allTargets[i].Name
-		inputFileNames = append(inputFileNames, inputFileName)
-		inputFileMap[allTargets[i].Name] = inputFileName
-		allTargets[i].InputFile = inputFileName
+		if len(allTargets[i].InputFiles) > 0 {
+			inputFilesMap[allTargets[i].Name] = allTargets[i].InputFiles
+		}
 	}
 
 	// Add dependencies: each target in level i depends on one random target from level i-1
@@ -328,32 +429,36 @@ func main() {
 		}
 	}
 
-	// Regenerate allTargets with updated dependencies, preserving InputFile assignments
+	// Regenerate allTargets with updated dependencies, preserving InputFiles assignments
 	allTargets = []Target{}
 	for _, level := range levels {
 		for _, target := range level {
-			// Restore InputFile from the map
-			if inputFile, ok := inputFileMap[target.Name]; ok {
-				target.InputFile = inputFile
+			// Restore InputFiles if they were assigned
+			if inputFiles, ok := inputFilesMap[target.Name]; ok {
+				target.InputFiles = inputFiles
 			}
 			allTargets = append(allTargets, target)
 		}
 	}
 
-	// Generate genrule targets for input files
-	var inputFileRules []string
-	for _, inputFileName := range inputFileNames {
-		// Generate random content (10-50 lines per file)
-		numLines := randomInt(40) + 10
-		content := generateInputFileContent(numLines)
-		rule := generateGenruleForInputFile(inputFileName, content)
-		inputFileRules = append(inputFileRules, rule)
+	// Create filegroup if input files were provided and using relative paths
+	// For absolute paths, we skip filegroup (user needs to handle file access)
+	var filegroupSrc []string
+	if len(availableFiles) > 0 && inputDirLabel != "" && !filepath.IsAbs(inputDirLabel) {
+		// Add all files to filegroup sources
+		for _, fileName := range availableFiles {
+			if inputDirLabel == "." || inputDirLabel == "" {
+				filegroupSrc = append(filegroupSrc, fileName)
+			} else {
+				filePath := filepath.ToSlash(filepath.Join(inputDirLabel, fileName))
+				filegroupSrc = append(filegroupSrc, filePath)
+			}
+		}
 	}
 
 	pkg := Package{
-		Targets:    allTargets,
-		InputFiles: inputFileRules,
+		Targets:      allTargets,
+		FilegroupSrc: filegroupSrc,
 	}
 	fmt.Print(pkg.Render())
 }
-

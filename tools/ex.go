@@ -11,7 +11,7 @@ import (
 
 func main() {
 	if len(os.Args) < 4 {
-		fmt.Fprintf(os.Stderr, "Usage: %s <usecs> <input_file> <output_file>\n", os.Args[0])
+		fmt.Fprintf(os.Stderr, "Usage: %s <usecs> <input_file1> [input_file2 ...] <output_file>\n", os.Args[0])
 		os.Exit(1)
 	}
 
@@ -21,8 +21,9 @@ func main() {
 		os.Exit(1)
 	}
 
-	inputFile := os.Args[2]
-	outputFile := os.Args[3]
+	// Last argument is output file, all others (after usecs) are input files
+	outputFile := os.Args[len(os.Args)-1]
+	inputFiles := os.Args[2 : len(os.Args)-1]
 
 	// Busy-wait for the specified duration
 	start := time.Now()
@@ -36,8 +37,8 @@ func main() {
 		}
 	}
 
-	// If no input file provided, create empty output
-	if inputFile == "" {
+	// If no input files provided, create empty output
+	if len(inputFiles) == 0 || (len(inputFiles) == 1 && inputFiles[0] == "") {
 		outFile, err := os.OpenFile(outputFile, os.O_TRUNC|os.O_CREATE|os.O_WRONLY, 0666)
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "Error creating output file: %v\n", err)
@@ -47,39 +48,45 @@ func main() {
 		return
 	}
 
-	// Read all lines from input file
-	file, err := os.Open(inputFile)
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "Error opening input file: %v\n", err)
-		os.Exit(1)
-	}
-	defer file.Close()
+	// Read all lines from all input files
+	var allLines []string
+	for _, inputFile := range inputFiles {
+		if inputFile == "" {
+			continue
+		}
+		file, err := os.Open(inputFile)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "Error opening input file %s: %v\n", inputFile, err)
+			os.Exit(1)
+		}
 
-	var lines []string
-	scanner := bufio.NewScanner(file)
-	for scanner.Scan() {
-		lines = append(lines, scanner.Text())
-	}
-	if err := scanner.Err(); err != nil {
-		fmt.Fprintf(os.Stderr, "Error reading input file: %v\n", err)
-		os.Exit(1)
+		scanner := bufio.NewScanner(file)
+		for scanner.Scan() {
+			allLines = append(allLines, scanner.Text())
+		}
+		if err := scanner.Err(); err != nil {
+			file.Close()
+			fmt.Fprintf(os.Stderr, "Error reading input file %s: %v\n", inputFile, err)
+			os.Exit(1)
+		}
+		file.Close()
 	}
 
-	if len(lines) == 0 {
-		fmt.Fprintf(os.Stderr, "Input file is empty\n")
+	if len(allLines) == 0 {
+		fmt.Fprintf(os.Stderr, "All input files are empty\n")
 		os.Exit(1)
 	}
 
 	// Select random lines (between 1 and all lines, but at least 1)
-	numLinesToSelect := randomInt(len(lines)) + 1
-	if numLinesToSelect > len(lines) {
-		numLinesToSelect = len(lines)
+	numLinesToSelect := randomInt(len(allLines)) + 1
+	if numLinesToSelect > len(allLines) {
+		numLinesToSelect = len(allLines)
 	}
 
 	// Randomly select lines
 	selectedIndices := make(map[int]bool)
 	for len(selectedIndices) < numLinesToSelect {
-		idx := randomInt(len(lines))
+		idx := randomInt(len(allLines))
 		selectedIndices[idx] = true
 	}
 
@@ -93,7 +100,7 @@ func main() {
 
 	writer := bufio.NewWriter(outFile)
 	for idx := range selectedIndices {
-		writer.WriteString(lines[idx])
+		writer.WriteString(allLines[idx])
 		writer.WriteString("\n")
 	}
 	writer.Flush()
@@ -105,10 +112,9 @@ func randomInt(max int) int {
 	}
 	b := make([]byte, 4)
 	rand.Read(b)
-	val := int(uint32(b[0])|uint32(b[1])<<8|uint32(b[2])<<16|uint32(b[3])<<24)
+	val := int(uint32(b[0]) | uint32(b[1])<<8 | uint32(b[2])<<16 | uint32(b[3])<<24)
 	if val < 0 {
 		val = -val
 	}
 	return val % max
 }
-

@@ -2,6 +2,8 @@
 bazel-*
 !bazel-tools/
 
+input_files/
+
 # Generated BUILD files (user-generated via tools:gen, not committed)
 # Note: tools/BUILD and third_party/BUILD should be committed
 /BUILD
