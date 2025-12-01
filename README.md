@@ -8,7 +8,7 @@ their position in the overall organization of the build graph.
 ### Generate BUILD file
 
 ```bash
-bazel run tools:gen <shift> <desired_targets> [input_dir] > BUILD
+bazel run //tools/gen:gen <shift> <desired_targets> [input_dir] > BUILD
 ```
 
 **Parameters:**
@@ -33,13 +33,13 @@ bazel run tools:gen <shift> <desired_targets> [input_dir] > BUILD
 **Example:**
 ```bash
 # Generate ~100 targets with 8 levels, using pre-generated input files
-bazel run tools:gen 3 100 input_files > BUILD
+bazel run //tools/gen:gen 3 100 input_files > BUILD
 
 # Generate ~1000 targets with 32 levels, using pre-generated input files
-bazel run tools:gen 5 1000 input_files > BUILD
+bazel run //tools/gen:gen 5 1000 input_files > BUILD
 
 # Generate targets without input files (faster generation, but no file I/O in stress test)
-bazel run tools:gen 5 1000 > BUILD
+bazel run //tools/gen:gen 5 1000 > BUILD
 ```
 
 ### Run the stress test
@@ -70,8 +70,8 @@ bazel build :all --remote_cache=...  # Use remote caching
 This project is implemented in Go and uses Bazel's Bzlmod for dependency management.
 
 **Main components:**
-- `tools/gen.go`: Generates BUILD files using a linear noise algorithm, randomly selecting files from input directories (single level only)
-- `tools/ex.go`: Executable that busy-waits, reads random lines from one or more input files, and writes to output files
+- `tools/gen/gen.go`: Generates BUILD files using a linear noise algorithm, randomly selecting files from input directories (single level only)
+- `tools/ex/ex.go`: Executable that busy-waits, reads random lines from one or more input files, and writes to output files
 - `stress.bzl`: Bazel rule definition for the stress test targets with support for multiple input files per action
 - `MODULE.bazel`: Bzlmod configuration (Bazel 8+)
 

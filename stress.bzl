@@ -29,7 +29,7 @@ remote_ex_rule = rule(
         "deps": attr.label_list(),
         "usecs": attr.int(mandatory=True),
         "input_files": attr.label_list(allow_files=True, doc="Input files to read random lines from"),
-        "_ex": attr.label(default="//tools:ex", executable=True, cfg="exec"),
+        "_ex": attr.label(default="//tools/ex:ex", executable=True, cfg="exec"),
     },
     outputs = {
         "txt": "%{name}.txt",
