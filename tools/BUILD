@@ -11,9 +11,3 @@ go_binary(
     srcs = ["gen.go"],
     visibility = ["//visibility:public"],
 )
-
-go_binary(
-    name = "filegen",
-    srcs = ["filegen.go"],
-    visibility = ["//visibility:public"],
-)

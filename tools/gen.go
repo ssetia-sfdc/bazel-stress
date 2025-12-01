@@ -2,10 +2,10 @@ package main
 
 import (
 	"bytes"
-	"crypto/rand"
 	"encoding/hex"
 	"fmt"
 	"math"
+	"math/rand"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -79,11 +79,7 @@ func (ln *LinearNoise) generateAt(at, length int, scale float64) {
 }
 
 func randomFloat() float64 {
-	b := make([]byte, 8)
-	rand.Read(b)
-	// Convert to float64 in range [0, 1)
-	val := float64(uint64(b[0])|uint64(b[1])<<8|uint64(b[2])<<16|uint64(b[3])<<24|uint64(b[4])<<32|uint64(b[5])<<40|uint64(b[6])<<48|uint64(b[7])<<56) / float64(1<<64)
-	return val
+	return rand.Float64()
 }
 
 // Target represents a Bazel target
@@ -213,18 +209,17 @@ func (p Package) Render() string {
 }
 
 func randomInt(max int) int {
-	b := make([]byte, 4)
-	rand.Read(b)
-	val := int(uint32(b[0])|uint32(b[1])<<8|uint32(b[2])<<16|uint32(b[3])<<24) % max
-	if val < 0 {
-		val = -val
+	if max <= 0 {
+		return 0
 	}
-	return val
+	return rand.Intn(max)
 }
 
 func randomHex() string {
 	b := make([]byte, 16)
-	rand.Read(b)
+	for i := range b {
+		b[i] = byte(rand.Intn(256))
+	}
 	return hex.EncodeToString(b)
 }
 
@@ -423,6 +418,9 @@ func main() {
 		prevLevel := levels[i-1]
 		for j := range levels[i] {
 			// Pick a random target from previous level
+			if len(prevLevel) == 0 {
+				continue
+			}
 			randomIdx := randomInt(len(prevLevel))
 			depName := ":" + prevLevel[randomIdx].Name
 			levels[i][j].Deps = []string{depName}

@@ -5,30 +5,7 @@ their position in the overall organization of the build graph.
 
 ## Usage
 
-### Step 1: Generate input files (optional but recommended)
-
-To avoid spending time generating input files during BUILD file generation, pre-generate a directory of input files:
-
-```bash
-bazel run tools:filegen <output_dir> <num_files> <min_size_bytes> <max_size_bytes>
-```
-
-**Parameters:**
-- `output_dir`: Directory where input files will be created
-- `num_files`: Number of files to generate
-- `min_size_bytes`: Minimum size of each file in bytes
-- `max_size_bytes`: Maximum size of each file in bytes
-
-**Example:**
-```bash
-# Generate 1000 files, each between 1KB and 1MB
-bazel run tools:filegen /tmp/input_files 1000 1048576 10485760
-
-# Or generate files in a workspace subdirectory
-bazel run tools:filegen input_files 1000 1024 1048576
-```
-
-### Step 2: Generate BUILD file
+### Generate BUILD file
 
 ```bash
 bazel run tools:gen <shift> <desired_targets> [input_dir] > BUILD
@@ -42,14 +19,15 @@ bazel run tools:gen <shift> <desired_targets> [input_dir] > BUILD
 - `desired_targets`: A total count of targets that should be generated.
   This is desired, not exact, and may shift slightly to ensure no empty
   levels.
-- `input_dir`: (Optional) Directory containing pre-generated input files.
-  If provided, files from this directory will be randomly assigned to actions
-  (some actions get 1 file, some get multiple files). If not provided, actions
-  will have no input files.
+- `input_dir`: (Optional) Directory containing input files.
+  If provided, files from this directory (single level only, subdirectories are not scanned) will be randomly selected and assigned to actions
+  (some actions get 1 file, some get multiple files). Files may be reused across different actions.
+  If not provided, actions will have no input files.
   
   **Path handling:**
   - Relative paths should be relative to the workspace root (where the BUILD file is generated)
   - Absolute paths are supported, but Bazel may require additional setup to access files outside the workspace
+  - Only files directly in the specified directory are considered (subdirectories are ignored)
   - Recommended: Use relative paths within the workspace (e.g., `input_files` instead of `/tmp/input_files`)
 
 **Example:**
@@ -77,7 +55,7 @@ This builds all generated targets. Each target:
 - Has dependencies forming a build graph
 - Tests Bazel's parallel build capabilities with realistic file operations
 
-**Note:** If input files were specified during BUILD file generation, each action will be randomly assigned 1-3 input files from the provided directory. Files may be reused across different actions.
+**Note:** If input files were specified during BUILD file generation, each action will be randomly assigned 1-3 input files from the provided directory. Only files directly in the directory are considered (subdirectories are not scanned). Files may be reused across different actions.
 
 **Goal:** Shortest time for a given parameter set wins.
 
@@ -92,8 +70,7 @@ bazel build :all --remote_cache=...  # Use remote caching
 This project is implemented in Go and uses Bazel's Bzlmod for dependency management.
 
 **Main components:**
-- `tools/filegen.go`: Standalone tool to generate a directory of input files with configurable size and count
-- `tools/gen.go`: Generates BUILD files using a linear noise algorithm, randomly assigning pre-generated input files to actions
+- `tools/gen.go`: Generates BUILD files using a linear noise algorithm, randomly selecting files from input directories (single level only)
 - `tools/ex.go`: Executable that busy-waits, reads random lines from one or more input files, and writes to output files
 - `stress.bzl`: Bazel rule definition for the stress test targets with support for multiple input files per action
 - `MODULE.bazel`: Bzlmod configuration (Bazel 8+)

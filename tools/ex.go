@@ -2,8 +2,8 @@ package main
 
 import (
 	"bufio"
-	"crypto/rand"
 	"fmt"
+	"math/rand"
 	"os"
 	"strconv"
 	"time"
@@ -110,11 +110,5 @@ func randomInt(max int) int {
 	if max <= 0 {
 		return 0
 	}
-	b := make([]byte, 4)
-	rand.Read(b)
-	val := int(uint32(b[0]) | uint32(b[1])<<8 | uint32(b[2])<<16 | uint32(b[3])<<24)
-	if val < 0 {
-		val = -val
-	}
-	return val % max
+	return rand.Intn(max)
 }
